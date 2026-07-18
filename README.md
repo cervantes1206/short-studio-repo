@@ -43,11 +43,20 @@ La publicación directa usa OAuth de Google desde el navegador — tus credencia
 
 ```
 shorts-studio/
-├── index.html   # toda la interfaz: HTML, CSS y JS en un solo archivo
+├── index.html      # toda la interfaz: HTML, CSS y JS en un solo archivo
+├── manifest.json   # metadata de la PWA (nombre, iconos, colores)
+├── sw.js           # service worker: cachea el shell de la app para uso offline
+├── icons/          # iconos de la app (192, 512, 180 apple-touch, 32 favicon)
 └── README.md
 ```
 
 No hay dependencias que instalar. Las fuentes se cargan desde Google Fonts y la autenticación desde Google Identity Services (`accounts.google.com/gsi/client`), ambas por CDN.
+
+## Instalar como app (PWA)
+
+La interfaz es una PWA instalable: en Chrome/Edge (Android o desktop) aparece un ícono de instalación en la barra de direcciones o en el menú ("Instalar app" / "Agregar a pantalla de inicio"); en Safari iOS es Compartir → "Agregar a pantalla de inicio".
+
+Esto **requiere que la app esté servida por HTTP/HTTPS** (no funciona abriendo el archivo con `file://`), porque el service worker que la hace instalable y con soporte offline solo se registra en esos contextos. Sirve localmente con `python3 -m http.server 8080` o despliega con GitHub Pages (ver abajo).
 
 ## Publicar con GitHub Pages
 

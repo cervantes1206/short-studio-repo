@@ -4,6 +4,14 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Shorts Studio — Guion con IA, validado por ti</title>
+<link rel="manifest" href="manifest.json">
+<link rel="icon" type="image/png" sizes="32x32" href="icons/icon-32.png">
+<link rel="icon" type="image/png" sizes="192x192" href="icons/icon-192.png">
+<link rel="apple-touch-icon" href="icons/icon-180.png">
+<meta name="theme-color" content="#14161A">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Shorts Studio">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
 <script src="https://accounts.google.com/gsi/client" async defer></script>
@@ -62,6 +70,7 @@
   .stage.active .marker{background:var(--bg);border-color:var(--rec);box-shadow:0 0 0 4px rgba(255,75,62,0.18);}
   .stage-label{font-family:var(--font-mono);font-size:11px;letter-spacing:0.5px;color:var(--muted);}
   .stage.active .stage-label, .stage.done .stage-label{color:var(--text);}
+  @media (max-width:420px){.stage-label{font-size:9px;letter-spacing:0.2px;}.stage-num{margin-right:2px;}}
   .stage-num{font-family:var(--font-mono);color:var(--muted);font-size:11px;margin-right:4px;}
 
   /* ---------- Layout ---------- */
@@ -229,6 +238,7 @@
   }
   .file-drop.filled{border-color:var(--green);color:var(--text);}
   .publish-row{display:grid;grid-template-columns:1fr 1fr;gap:14px;}
+  @media (max-width:480px){.publish-row{grid-template-columns:1fr;}}
   .confirm-box{
     border:1px solid var(--amber);background:rgba(242,183,5,0.07);border-radius:10px;padding:14px 16px;margin-top:12px;
   }
@@ -1047,6 +1057,12 @@ draft = newDraftObj();
 setStage(1);
 renderDraftList();
 loadChannels();
+
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('sw.js').catch((err) => console.error('SW registration failed:', err));
+  });
+}
 </script>
 </body>
 </html>
