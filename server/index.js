@@ -9,6 +9,10 @@ app.use(express.json());
 
 app.use('/api/projects', projectsRouter);
 
+// Generated images (per-beat) live under server/storage/<projectId>/ and are
+// served publicly so <img> tags in the frontend can reference them directly.
+app.use('/storage', express.static(path.join(__dirname, 'storage')));
+
 // Serve the existing static frontend (index.html, manifest.json, sw.js, icons/)
 // from the repo root, so the whole app runs from a single `npm start`.
 app.use(express.static(path.join(__dirname, '..')));

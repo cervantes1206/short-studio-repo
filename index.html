@@ -156,6 +156,7 @@
   .beat-head{display:flex;justify-content:space-between;font-family:var(--font-mono);font-size:11px;color:var(--muted);margin-bottom:6px;}
   .beat textarea{margin-bottom:6px;}
   .beat .visual-tag{font-family:var(--font-mono);font-size:10.5px;color:var(--amber);}
+  .beat-image{width:100%;max-height:160px;object-fit:cover;border-radius:8px;margin-top:6px;display:block;}
 
   .hashtags{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:14px;}
   .tag{background:var(--surface2);border:1px solid var(--line);border-radius:20px;padding:5px 11px;font-size:12px;font-family:var(--font-mono);}
@@ -372,6 +373,8 @@
 
         <label>Guion por bloques</label>
         <div id="beatsContainer"></div>
+        <button class="ghost" id="generateImagesBtn" type="button" style="margin-bottom:14px;">🖼️ Generar imágenes relacionadas</button>
+        <div id="imagesErrorBox"></div>
 
         <label>Descripción</label>
         <textarea id="descField" rows="4"></textarea>
@@ -548,12 +551,20 @@ function setStage(n){
 }
 
 function renderPhone(){
+  const phoneEl = document.querySelector('.phone');
   const el = document.getElementById('phoneContent');
   if(!draft.hook && (!draft.beats || draft.beats.length===0)){
     el.innerHTML = '<div class="phone-empty">Aún no hay guion.<br>Completa el paso 01.</div>';
+    phoneEl.style.backgroundImage = '';
     return;
   }
   const titulo = (draft.titulos && draft.titulos[draft.tituloSeleccionado]) || draft.tema || '';
+  const previewImage = (draft.beats||[]).find(b=>b.imagePath)?.imagePath;
+  phoneEl.style.backgroundImage = previewImage
+    ? `linear-gradient(180deg, rgba(0,0,0,0.15), rgba(0,0,0,0.55)), url("${previewImage}")`
+    : '';
+  phoneEl.style.backgroundSize = 'cover';
+  phoneEl.style.backgroundPosition = 'center';
   el.innerHTML = `
     <div class="phone-badge">${draft.duracion}</div>
     <div class="phone-hook">${escapeHtml(draft.hook || draft.tema || '')}</div>
@@ -650,6 +661,7 @@ function renderStage2(){
     <div class="beat">
       <div class="beat-head"><span>BLOQUE ${i+1} · ${escapeHtml(b.tiempo||'')}</span><span class="visual-tag">${escapeHtml(b.visual||'')}</span></div>
       <textarea rows="2" data-beat="${i}">${escapeHtml(b.texto||'')}</textarea>
+      ${b.imagePath ? `<img class="beat-image" src="${b.imagePath}" alt="Imagen generada para el bloque ${i+1}">` : ''}
     </div>
   `).join('');
   beatsEl.querySelectorAll('textarea').forEach(ta=>{
@@ -726,6 +738,36 @@ document.getElementById('miniaturaField').addEventListener('input', (e)=>{ draft
 document.getElementById('toValidateBtn').addEventListener('click', async ()=>{
   setStage(3);
   await saveDraft();
+});
+
+document.getElementById('generateImagesBtn').addEventListener('click', async ()=>{
+  const errEl = document.getElementById('imagesErrorBox');
+  errEl.innerHTML = '';
+  if(!draft || !draft.id){
+    errEl.innerHTML = '<div class="error-box">Genera el guion primero.</div>';
+    return;
+  }
+  const btn = document.getElementById('generateImagesBtn');
+  btn.disabled = true;
+  const originalLabel = btn.innerHTML;
+  btn.innerHTML = '<span class="spinner"></span> Generando imágenes... (1-2 minutos, una por una)';
+  try{
+    const response = await fetch('/api/projects/'+draft.id+'/images', { method: 'POST' });
+    const result = await response.json();
+    if(!response.ok) throw new Error(result.error || 'No se pudieron generar las imágenes.');
+    draft.beats = result.beats || draft.beats;
+    renderStage2();
+    renderPhone();
+    if(result.imageErrors && result.imageErrors.length){
+      errEl.innerHTML = '<div class="error-box">Algunos bloques fallaron: '+escapeHtml(result.imageErrors.join(' | '))+'</div>';
+    }
+  }catch(e){
+    console.error(e);
+    errEl.innerHTML = '<div class="error-box">'+escapeHtml(e.message)+'</div>';
+  }finally{
+    btn.disabled = false;
+    btn.innerHTML = originalLabel;
+  }
 });
 
 ['chk1','chk2','chk3','chk4'].forEach(id=>{

@@ -7,7 +7,7 @@ No es un bot de publicación automática. Cada video pasa por un checklist que m
 ## Qué hace
 
 1. **Generar** — describes el tema, tono, duración y audiencia; el backend le pide a un modelo de IA (vía la API gratuita de NVIDIA) que genere gancho, guion por bloques, opciones de título, descripción, hashtags y texto de miniatura.
-2. **Revisar** — todos los campos quedan editables. El contenido generado es un punto de partida, no una versión final.
+2. **Revisar** — todos los campos quedan editables. El contenido generado es un punto de partida, no una versión final. Desde aquí también puedes generar una imagen relacionada para cada bloque del guion (gratis, vía Pollinations.ai) y verlas en la vista previa tipo teléfono.
 3. **Validar** — un checklist manual (guion revisado, sin derechos de autor, sin clickbait, cumple normas de YouTube) más un interruptor para declarar contenido sintético/alterado por IA.
 4. **Exportar / Publicar** — copia los campos para subirlos tú mismo en YouTube Studio, o conecta tu canal y publica directamente desde la interfaz, con visibilidad privada por defecto y confirmación antes de cada subida.
 
@@ -49,6 +49,17 @@ La generación de guiones usa la [API gratuita de NVIDIA](https://build.nvidia.c
 
 > Nota sobre velocidad: los modelos gratuitos corren en funciones serverless que "duermen" cuando no se usan. La primera generación después de un rato inactivo puede tardar bastante (se vieron casos de +30s) mientras la función arranca — el backend reintenta automáticamente esos fallos iniciales. Generaciones seguidas son mucho más rápidas.
 
+### Generación de imágenes vía Pollinations.ai (gratis, sin cuenta)
+
+Cada bloque del guion trae una nota de "qué mostrar en pantalla" — el botón **"Generar imágenes relacionadas"** (paso 02, Revisar) le pasa esa nota a [Pollinations.ai](https://pollinations.ai) para generar una imagen por bloque. No necesita clave de API ni cuenta.
+
+- `POLLINATIONS_MODEL` en `.env` controla el modelo de imagen (por defecto `flux`). No hace falta tocarlo salvo que quieras probar otro (`turbo`, `stable-diffusion`, etc.).
+- El servicio anónimo limita a **una petición cada 15 segundos aproximadamente** — generar las imágenes de un short de 4-6 bloques toma 1-2 minutos. El backend ya espacia las peticiones automáticamente, no hace falta hacer nada.
+- Las imágenes gratuitas pueden traer una marca de agua pequeña — si eso te molesta para el resultado final, esta es la primera pieza candidata a cambiar por un proveedor de pago (ver `server/providers/image.js`, tiene la misma interfaz intercambiable que `llm.js`).
+- Las imágenes se guardan en `server/storage/<id-del-proyecto>/` (no se suben al repo — están en `.gitignore`).
+
+> Nota importante ya aprendida en este proyecto: los modelos de imagen que aparecen en el catálogo de build.nvidia.com (FLUX, Stable Diffusion, Qwen-Image) **no tienen versión gratuita alojada** — solo existen como contenedor Docker que corres tú mismo en tu propia GPU. Por eso esta app usa Pollinations para imágenes y NVIDIA solo para texto.
+
 ## Conectar tu canal de YouTube (opcional)
 
 La publicación directa usa OAuth de Google desde el navegador — tus credenciales nunca pasan por ningún servidor intermedio. Necesitas tu propio proyecto de Google Cloud:
@@ -74,10 +85,12 @@ shorts-studio/
 ├── icons/               # iconos de la app (192, 512, 180 apple-touch, 32 favicon)
 ├── .env.example         # plantilla de variables de entorno (NVIDIA_API_KEY, NVIDIA_MODEL, PORT)
 ├── server/
-│   ├── index.js         # servidor Express: sirve la API y el frontend estático
+│   ├── index.js         # servidor Express: sirve la API, el frontend y /storage
 │   ├── db.js             # conexión SQLite + creación de tablas (projects, beats, jobs)
-│   ├── routes/projects.js   # endpoints /api/projects (crear, listar, ver, editar)
-│   ├── providers/llm.js  # llamada a la API gratuita de NVIDIA (NIM), movida aquí desde el navegador
+│   ├── storage.js        # guarda las imágenes generadas en server/storage/<id>/
+│   ├── routes/projects.js   # endpoints /api/projects (crear, listar, ver, editar, generar imágenes)
+│   ├── providers/llm.js  # llamada a la API gratuita de NVIDIA (NIM) para el guion
+│   ├── providers/image.js  # llamada a Pollinations.ai para las imágenes por bloque
 │   └── director/prompt.js  # el prompt que define cómo la IA planea cada guion
 └── README.md
 ```

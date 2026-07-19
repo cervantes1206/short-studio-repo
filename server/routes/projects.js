@@ -1,14 +1,17 @@
 const express = require('express');
 const db = require('../db');
 const { callNvidia } = require('../providers/llm');
+const { generateImage } = require('../providers/image');
 const { buildScriptPrompt } = require('../director/prompt');
+const { saveImage } = require('../storage');
 
 const router = express.Router();
 
 function loadBeats(projectId) {
   return db
-    .prepare('SELECT tiempo, texto, visual FROM beats WHERE project_id = ? ORDER BY orden ASC')
-    .all(projectId);
+    .prepare('SELECT orden, tiempo, texto, visual, image_path FROM beats WHERE project_id = ? ORDER BY orden ASC')
+    .all(projectId)
+    .map((b) => ({ tiempo: b.tiempo, texto: b.texto, visual: b.visual, imagePath: b.image_path }));
 }
 
 function serializeProject(row) {
@@ -154,6 +157,44 @@ router.patch('/:id', (req, res) => {
 
   const updated = db.prepare('SELECT * FROM projects WHERE id = ?').get(row.id);
   res.json(serializeProject(updated));
+});
+
+// POST /api/projects/:id/images — generate one related image per beat, using
+// each beat's "visual" note (already written by the script step) as the prompt.
+router.post('/:id/images', async (req, res) => {
+  const row = db.prepare('SELECT * FROM projects WHERE id = ?').get(req.params.id);
+  if (!row) return res.status(404).json({ error: 'Proyecto no encontrado' });
+
+  const beats = db
+    .prepare('SELECT id, orden, visual FROM beats WHERE project_id = ? ORDER BY orden ASC')
+    .all(row.id);
+  if (beats.length === 0) {
+    return res.status(400).json({ error: 'Este proyecto todavía no tiene bloques de guion.' });
+  }
+
+  const updateImagePath = db.prepare('UPDATE beats SET image_path = ? WHERE id = ?');
+  const errors = [];
+
+  for (const beat of beats) {
+    const prompt = (beat.visual || '').trim();
+    if (!prompt) continue;
+    try {
+      const buffer = await generateImage(prompt);
+      const publicPath = saveImage(row.id, beat.orden, buffer);
+      updateImagePath.run(publicPath, beat.id);
+    } catch (e) {
+      errors.push(`Bloque ${beat.orden + 1}: ${e.message}`);
+    }
+  }
+
+  db.prepare("UPDATE projects SET updated_at = datetime('now') WHERE id = ?").run(row.id);
+  const updated = db.prepare('SELECT * FROM projects WHERE id = ?').get(row.id);
+  const project = serializeProject(updated);
+
+  if (errors.length === beats.length) {
+    return res.status(502).json({ error: errors.join(' | '), ...project });
+  }
+  res.json({ ...project, imageErrors: errors });
 });
 
 module.exports = router;
