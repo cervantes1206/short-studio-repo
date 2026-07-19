@@ -267,29 +267,6 @@
     <div class="badge"><span class="dot"></span> sin publicación automática</div>
   </header>
 
-  <div class="panel" id="panelApiKey">
-    <div class="toggle-row" id="apiKeyToggle">
-      <h2 style="margin:0;"><span class="n">IA</span> Clave de API de Claude</h2>
-      <div class="status"><span class="chan-dot" id="apiKeyDot"></span><span id="apiKeyStatusText">sin configurar</span> <span style="opacity:0.5;">▾</span></div>
-    </div>
-    <div id="apiKeyBody" style="display:none;">
-      <div class="desc" style="margin-top:14px;">Se necesita una clave de API de Anthropic para generar guiones con IA. Se guarda solo en este navegador (localStorage) y se envía directamente a la API de Anthropic — nunca pasa por un servidor propio.</div>
-      <div class="info-box">
-        Consigue tu clave en <a href="https://console.anthropic.com/settings/keys" target="_blank">console.anthropic.com/settings/keys</a>. Cualquiera con acceso a este navegador podría leerla, así que no uses este equipo compartido para guardarla.
-      </div>
-      <div class="row">
-        <div>
-          <label>Clave de API (Anthropic)</label>
-          <input type="password" id="apiKeyInput" placeholder="sk-ant-...">
-        </div>
-        <div style="display:flex;align-items:flex-end;">
-          <button class="primary" id="saveApiKeyBtn" style="width:100%;justify-content:center;">Guardar clave</button>
-        </div>
-      </div>
-      <div id="apiKeyError"></div>
-    </div>
-  </div>
-
   <div class="panel" id="panelChannels">
     <div class="toggle-row" id="channelsToggle">
       <h2 style="margin:0;"><span class="n">YT</span> Canales de YouTube</h2>
@@ -546,18 +523,16 @@ window.storage = {
   async set(key, value){ localStorage.setItem(key, value); }
 };
 
-const STORAGE_LIST_KEY = 'shorts:list';
-const API_KEY_STORAGE = 'anthropic:apiKey';
 let draft = null;
 
 function newDraftObj(){
   return {
-    id: 'd' + Date.now(),
+    id: null,
     tema:'', tono:'Cercano y directo', duracion:'30 segundos', audiencia:'',
     hook:'', beats:[], titulos:[], tituloSeleccionado:0,
     descripcion:'', hashtags:[], miniaturaTexto:'',
     checklist:{chk1:false,chk2:false,chk3:false,chk4:false}, iaGenerativa:false,
-    stage:1, createdAt: Date.now(), titleForList:'Short sin título'
+    stage:1, titleForList:'Short sin título'
   };
 }
 
@@ -594,15 +569,19 @@ function escapeHtml(s){
 }
 
 async function saveDraft(){
+  if(!draft || !draft.id) return; // not persisted yet (e.g. blank/new draft before first generation)
   try{
-    draft.titleForList = (draft.titulos && draft.titulos[draft.tituloSeleccionado]) || draft.tema || 'Short sin título';
-    await window.storage.set('shorts:draft:'+draft.id, JSON.stringify(draft));
-    const listRes = await safeGet(STORAGE_LIST_KEY);
-    let list = listRes ? JSON.parse(listRes.value) : [];
-    list = list.filter(d => d.id !== draft.id);
-    list.unshift({id:draft.id, title:draft.titleForList, stage:draft.stage});
-    await window.storage.set(STORAGE_LIST_KEY, JSON.stringify(list));
-    renderDraftList(list);
+    await fetch('/api/projects/'+draft.id, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        hook: draft.hook, beats: draft.beats, titulos: draft.titulos,
+        tituloSeleccionado: draft.tituloSeleccionado, descripcion: draft.descripcion,
+        hashtags: draft.hashtags, miniaturaTexto: draft.miniaturaTexto,
+        stage: draft.stage, checklist: draft.checklist, iaGenerativa: draft.iaGenerativa
+      })
+    });
+    renderDraftList();
   }catch(e){ console.error('No se pudo guardar', e); }
 }
 
@@ -610,12 +589,13 @@ async function safeGet(key, shared=false){
   try{ return await window.storage.get(key, shared); }catch(e){ return null; }
 }
 
-async function renderDraftList(list){
-  if(!list){
-    const r = await safeGet(STORAGE_LIST_KEY);
-    list = r ? JSON.parse(r.value) : [];
-  }
+async function renderDraftList(){
   const el = document.getElementById('draftListEl');
+  let list = [];
+  try{
+    const r = await fetch('/api/projects');
+    list = await r.json();
+  }catch(e){ console.error('No se pudo cargar la lista de shorts', e); }
   if(list.length===0){ el.innerHTML = '<div style="color:var(--muted);font-size:12px;">Sin borradores guardados aún.</div>'; return; }
   el.innerHTML = list.map(d => `
     <div class="draft-item" data-id="${d.id}">
@@ -625,8 +605,8 @@ async function renderDraftList(list){
   `).join('');
   el.querySelectorAll('.draft-item').forEach(item=>{
     item.addEventListener('click', async ()=>{
-      const r = await safeGet('shorts:draft:'+item.dataset.id);
-      if(r){ draft = JSON.parse(r.value); hydrateFormFromDraft(); }
+      const r = await fetch('/api/projects/'+item.dataset.id);
+      if(r.ok){ draft = await r.json(); hydrateFormFromDraft(); }
     });
   });
 }
@@ -697,103 +677,7 @@ function renderExport(){
   if(synth) synth.checked = !!draft.iaGenerativa;
 }
 
-// ---- API key (Anthropic) ----
-async function getApiKey(){
-  const r = await safeGet(API_KEY_STORAGE);
-  return r ? r.value : '';
-}
-
-function renderApiKeyStatus(hasKey){
-  document.getElementById('apiKeyDot').classList.toggle('on', hasKey);
-  document.getElementById('apiKeyStatusText').innerText = hasKey ? 'clave configurada' : 'sin configurar';
-}
-
-async function loadApiKeyStatus(){
-  const key = await getApiKey();
-  renderApiKeyStatus(!!key);
-}
-
-document.getElementById('apiKeyToggle').addEventListener('click', ()=>{
-  document.getElementById('apiKeyBody').classList.toggle('open');
-  const body = document.getElementById('apiKeyBody');
-  body.style.display = body.style.display === 'none' ? 'block' : 'none';
-});
-
-document.getElementById('saveApiKeyBtn').addEventListener('click', async ()=>{
-  const errEl = document.getElementById('apiKeyError');
-  errEl.innerHTML = '';
-  const key = document.getElementById('apiKeyInput').value.trim();
-  if(!key){
-    errEl.innerHTML = '<div class="error-box">Pega tu clave de API primero.</div>';
-    return;
-  }
-  await window.storage.set(API_KEY_STORAGE, key);
-  document.getElementById('apiKeyInput').value = '';
-  await loadApiKeyStatus();
-});
-
-// ---- AI generation ----
-const SCRIPT_SCHEMA = {
-  type: "object",
-  properties: {
-    hook: { type: "string", description: "Frase de gancho para los primeros 2 segundos" },
-    beats: {
-      type: "array",
-      items: {
-        type: "object",
-        properties: {
-          tiempo: { type: "string" },
-          texto: { type: "string" },
-          visual: { type: "string", description: "Nota de qué mostrar en pantalla" }
-        },
-        required: ["tiempo", "texto", "visual"],
-        additionalProperties: false
-      }
-    },
-    titulos: { type: "array", items: { type: "string" } },
-    descripcion: { type: "string" },
-    hashtags: { type: "array", items: { type: "string" } },
-    miniaturaTexto: { type: "string" }
-  },
-  required: ["hook", "beats", "titulos", "descripcion", "hashtags", "miniaturaTexto"],
-  additionalProperties: false
-};
-
-async function callClaude(prompt){
-  const apiKey = await getApiKey();
-  if(!apiKey){
-    throw new Error('Configura tu clave de API de Anthropic en el panel "Clave de API de Claude" arriba.');
-  }
-  const response = await fetch("https://api.anthropic.com/v1/messages", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "x-api-key": apiKey,
-      "anthropic-version": "2023-06-01",
-      "anthropic-dangerous-direct-browser-access": "true"
-    },
-    body: JSON.stringify({
-      model: "claude-opus-4-8",
-      max_tokens: 2048,
-      output_config: { format: { type: "json_schema", schema: SCRIPT_SCHEMA } },
-      messages: [{ role: "user", content: prompt }]
-    })
-  });
-  if(!response.ok){
-    const errBody = await response.text().catch(()=> '');
-    let msg = errBody;
-    try{ msg = JSON.parse(errBody).error?.message || errBody; }catch(e){}
-    throw new Error(`La API respondió ${response.status}: ${msg}`);
-  }
-  const data = await response.json();
-  if(data.stop_reason === 'refusal'){
-    throw new Error('Claude no pudo generar este contenido (se activó un filtro de seguridad). Prueba con otro tema.');
-  }
-  const textBlock = (data.content || []).find(b => b.type === 'text');
-  if(!textBlock) throw new Error('Respuesta vacía de la IA');
-  return JSON.parse(textBlock.text);
-}
-
+// ---- AI generation (now handled by the backend — no API key in the browser) ----
 document.getElementById('generateBtn').addEventListener('click', async ()=>{
   const tema = document.getElementById('tema').value.trim();
   const errorBox = document.getElementById('errorBox');
@@ -806,27 +690,24 @@ document.getElementById('generateBtn').addEventListener('click', async ()=>{
   btn.disabled = true;
   btn.innerHTML = '<span class="spinner"></span> Generando...';
 
-  draft = newDraftObj();
-  draft.tema = tema;
-  draft.tono = document.getElementById('tono').value;
-  draft.duracion = document.getElementById('duracion').value;
-  draft.audiencia = document.getElementById('audiencia').value.trim();
-
-  const prompt = `Eres guionista de YouTube Shorts. Tema: "${draft.tema}". Tono: ${draft.tono}. Duración objetivo: ${draft.duracion}. Audiencia: ${draft.audiencia || 'general'}.
-Genera un gancho para los primeros 2 segundos, entre 4 y 6 bloques de guion ("beats") que cubran toda la duración con su tiempo y una nota de qué mostrar en pantalla, 3 opciones de título, una descripción de 2-3 frases para YouTube, 3 hashtags y un texto corto para la miniatura.`;
+  const tono = document.getElementById('tono').value;
+  const duracion = document.getElementById('duracion').value;
+  const audiencia = document.getElementById('audiencia').value.trim();
 
   try{
-    const result = await callClaude(prompt);
-    draft.hook = result.hook || '';
-    draft.beats = result.beats || [];
-    draft.titulos = result.titulos || [draft.tema];
-    draft.descripcion = result.descripcion || '';
-    draft.hashtags = result.hashtags || [];
-    draft.miniaturaTexto = result.miniaturaTexto || '';
+    const response = await fetch('/api/projects', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ tema, tono, duracion, audiencia })
+    });
+    const result = await response.json();
+    if(!response.ok) throw new Error(result.error || 'No se pudo generar el borrador.');
+
+    draft = result;
     renderStage2();
     renderPhone();
     setStage(2);
-    await saveDraft();
+    renderDraftList();
   }catch(e){
     console.error(e);
     errorBox.innerHTML = '<div class="error-box">No se pudo generar el borrador: '+escapeHtml(e.message)+'</div>';
@@ -1159,7 +1040,6 @@ draft = newDraftObj();
 setStage(1);
 renderDraftList();
 loadChannels();
-loadApiKeyStatus();
 
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', () => {

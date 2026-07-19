@@ -1,2 +1,9 @@
 .DS_Store
 *.log
+.env
+node_modules/
+server/node_modules/
+server/*.db
+server/*.db-journal
+server/*.db-wal
+server/*.db-shm

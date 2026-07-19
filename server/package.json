@@ -1,0 +1,15 @@
+{
+  "name": "shorts-studio-server",
+  "version": "1.0.0",
+  "description": "Backend for Shorts Studio — script generation, project storage, and (future) voice/image/video pipeline.",
+  "type": "commonjs",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js"
+  },
+  "dependencies": {
+    "better-sqlite3": "^11.3.0",
+    "dotenv": "^16.4.5",
+    "express": "^4.19.2"
+  }
+}
