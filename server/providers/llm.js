@@ -1,6 +1,6 @@
-// Anthropic (Claude) provider — moved server-side from index.html's callClaude().
-// Same model and structured-output approach; the browser-only CORS header
-// (anthropic-dangerous-direct-browser-access) is dropped since this now runs server-side.
+// NVIDIA NIM provider (build.nvidia.com) — OpenAI-compatible chat completions.
+// Free-tier API key, no credit card. Model is configurable via NVIDIA_MODEL
+// since NVIDIA's catalog renames/rotates model slugs over time.
 
 const SCRIPT_SCHEMA = {
   type: 'object',
@@ -28,24 +28,49 @@ const SCRIPT_SCHEMA = {
   additionalProperties: false
 };
 
-async function callClaude(prompt) {
-  const apiKey = process.env.ANTHROPIC_API_KEY;
-  if (!apiKey) {
-    throw new Error('Falta ANTHROPIC_API_KEY en el entorno del servidor (.env).');
-  }
+const DEFAULT_MODEL = 'deepseek-ai/deepseek-v4-pro';
 
-  const response = await fetch('https://api.anthropic.com/v1/messages', {
+// NVIDIA's free-tier endpoints run on serverless GPU functions (NVCF) that cold-start —
+// the first call after idle time can 404/5xx even with a valid request. Retry a couple times.
+const COLD_START_STATUSES = new Set([404, 408, 429, 500, 502, 503, 504]);
+const RETRY_DELAYS_MS = [800, 1500, 2500, 4000];
+
+function extractJson(text) {
+  const fenced = text.match(/```(?:json)?\s*([\s\S]*?)```/i);
+  const candidate = fenced ? fenced[1] : text;
+  const start = candidate.indexOf('{');
+  const end = candidate.lastIndexOf('}');
+  if (start === -1 || end === -1) throw new Error('La IA no devolvió un JSON reconocible.');
+  return JSON.parse(candidate.slice(start, end + 1));
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function requestCompletion(apiKey, model, prompt) {
+  const response = await fetch('https://integrate.api.nvidia.com/v1/chat/completions', {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      'x-api-key': apiKey,
-      'anthropic-version': '2023-06-01'
+      Authorization: `Bearer ${apiKey}`
     },
     body: JSON.stringify({
-      model: 'claude-opus-4-8',
+      model,
+      messages: [
+        {
+          role: 'system',
+          content:
+            'Respondes ÚNICAMENTE con un objeto JSON válido (sin texto adicional, sin markdown) que cumpla exactamente este schema: ' +
+            JSON.stringify(SCRIPT_SCHEMA)
+        },
+        { role: 'user', content: prompt }
+      ],
+      temperature: 0.7,
+      top_p: 0.9,
       max_tokens: 2048,
-      output_config: { format: { type: 'json_schema', schema: SCRIPT_SCHEMA } },
-      messages: [{ role: 'user', content: prompt }]
+      response_format: { type: 'json_object' },
+      stream: false
     })
   });
 
@@ -53,17 +78,36 @@ async function callClaude(prompt) {
     const errBody = await response.text().catch(() => '');
     let msg = errBody;
     try { msg = JSON.parse(errBody).error?.message || errBody; } catch (e) {}
-    throw new Error(`La API respondió ${response.status}: ${msg}`);
+    const error = new Error(`La API de NVIDIA respondió ${response.status}: ${msg}`);
+    error.status = response.status;
+    throw error;
   }
 
-  const data = await response.json();
-  if (data.stop_reason === 'refusal') {
-    throw new Error('Claude no pudo generar este contenido (se activó un filtro de seguridad). Prueba con otro tema.');
-  }
-
-  const textBlock = (data.content || []).find((b) => b.type === 'text');
-  if (!textBlock) throw new Error('Respuesta vacía de la IA');
-  return JSON.parse(textBlock.text);
+  return response.json();
 }
 
-module.exports = { callClaude, SCRIPT_SCHEMA };
+async function callNvidia(prompt) {
+  const apiKey = process.env.NVIDIA_API_KEY;
+  if (!apiKey) {
+    throw new Error('Falta NVIDIA_API_KEY en el entorno del servidor (.env).');
+  }
+  const model = process.env.NVIDIA_MODEL || DEFAULT_MODEL;
+
+  let data;
+  for (let attempt = 0; ; attempt++) {
+    try {
+      data = await requestCompletion(apiKey, model, prompt);
+      break;
+    } catch (e) {
+      const canRetry = COLD_START_STATUSES.has(e.status) && attempt < RETRY_DELAYS_MS.length;
+      if (!canRetry) throw e;
+      await sleep(RETRY_DELAYS_MS[attempt]);
+    }
+  }
+
+  const content = data.choices?.[0]?.message?.content;
+  if (!content) throw new Error('Respuesta vacía de la IA');
+  return extractJson(content);
+}
+
+module.exports = { callNvidia, SCRIPT_SCHEMA };

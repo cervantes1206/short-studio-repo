@@ -1,6 +1,6 @@
 const express = require('express');
 const db = require('../db');
-const { callClaude } = require('../providers/llm');
+const { callNvidia } = require('../providers/llm');
 const { buildScriptPrompt } = require('../director/prompt');
 
 const router = express.Router();
@@ -71,7 +71,7 @@ router.post('/', async (req, res) => {
 
   try {
     const prompt = buildScriptPrompt(params);
-    const result = await callClaude(prompt);
+    const result = await callNvidia(prompt);
 
     db.prepare(`
       UPDATE projects SET

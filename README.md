@@ -6,7 +6,7 @@ No es un bot de publicación automática. Cada video pasa por un checklist que m
 
 ## Qué hace
 
-1. **Generar** — describes el tema, tono, duración y audiencia; el backend le pide a Claude (Anthropic) que genere gancho, guion por bloques, opciones de título, descripción, hashtags y texto de miniatura.
+1. **Generar** — describes el tema, tono, duración y audiencia; el backend le pide a un modelo de IA (vía la API gratuita de NVIDIA) que genere gancho, guion por bloques, opciones de título, descripción, hashtags y texto de miniatura.
 2. **Revisar** — todos los campos quedan editables. El contenido generado es un punto de partida, no una versión final.
 3. **Validar** — un checklist manual (guion revisado, sin derechos de autor, sin clickbait, cumple normas de YouTube) más un interruptor para declarar contenido sintético/alterado por IA.
 4. **Exportar / Publicar** — copia los campos para subirlos tú mismo en YouTube Studio, o conecta tu canal y publica directamente desde la interfaz, con visibilidad privada por defecto y confirmación antes de cada subida.
@@ -20,7 +20,7 @@ Esta app ya **requiere el backend** (carpeta `server/`) — la generación con I
 ```bash
 cd server
 npm install
-cp ../.env.example ../.env   # y pega tu ANTHROPIC_API_KEY real
+cp ../.env.example ../.env   # y pega tu NVIDIA_API_KEY real
 npm start
 # abre http://localhost:3001
 ```
@@ -32,9 +32,22 @@ El servidor sirve tanto la API (`/api/projects`) como el frontend estático (`in
 ## Configurar el backend
 
 1. `cd server && npm install`.
-2. Copia `.env.example` a `.env` en la raíz del proyecto y pega tu clave real de Anthropic (`console.anthropic.com/settings/keys`) en `ANTHROPIC_API_KEY`. Esta clave **vive solo en el servidor** — nunca se envía al navegador.
+2. Copia `.env.example` a `.env` en la raíz del proyecto y pega tu clave real de NVIDIA. Esta clave **vive solo en el servidor** — nunca se envía al navegador.
 3. `npm start` — arranca en el puerto de `PORT` (por defecto 3001).
 4. Los proyectos se guardan en `server/shorts-studio.db` (SQLite), creada automáticamente en el primer arranque.
+
+### Generación con IA vía NVIDIA (gratis)
+
+La generación de guiones usa la [API gratuita de NVIDIA](https://build.nvidia.com) (NIM), compatible con el formato de OpenAI, sin necesidad de tarjeta de crédito:
+
+1. Crea una cuenta gratuita en [build.nvidia.com](https://build.nvidia.com) (NVIDIA Developer Program).
+2. Abre cualquier modelo del catálogo (por ejemplo, busca "deepseek") y haz clic en **Get API Key** — obtienes una key `nvapi-...` con ~1.000 créditos de prueba gratis (hasta 5.000 verificando una cuenta con correo empresarial) y un límite de 40 solicitudes/minuto.
+3. Pega esa key en `NVIDIA_API_KEY` dentro de `.env`.
+4. `NVIDIA_MODEL` controla qué modelo se usa (por defecto `deepseek-ai/deepseek-v4-pro`). El catálogo de NVIDIA renombra sus modelos de vez en cuando — si ves un error 400/404 al generar, entra a build.nvidia.com, abre el modelo que quieras usar y copia el valor exacto de `"model"` del snippet de código que te muestra ahí.
+
+> Nota: los créditos gratuitos de NVIDIA son para desarrollo/pruebas, no para uso en producción con usuarios reales a gran escala (eso requiere licencia NVIDIA AI Enterprise). Para el uso personal de esta app, el tier gratuito alcanza sobra.
+
+> Nota sobre velocidad: los modelos gratuitos corren en funciones serverless que "duermen" cuando no se usan. La primera generación después de un rato inactivo puede tardar bastante (se vieron casos de +30s) mientras la función arranca — el backend reintenta automáticamente esos fallos iniciales. Generaciones seguidas son mucho más rápidas.
 
 ## Conectar tu canal de YouTube (opcional)
 
@@ -59,13 +72,13 @@ shorts-studio/
 ├── manifest.json       # metadata de la PWA (nombre, iconos, colores)
 ├── sw.js               # service worker: cachea el shell de la app para uso offline
 ├── icons/               # iconos de la app (192, 512, 180 apple-touch, 32 favicon)
-├── .env.example         # plantilla de variables de entorno (ANTHROPIC_API_KEY, PORT)
+├── .env.example         # plantilla de variables de entorno (NVIDIA_API_KEY, NVIDIA_MODEL, PORT)
 ├── server/
 │   ├── index.js         # servidor Express: sirve la API y el frontend estático
 │   ├── db.js             # conexión SQLite + creación de tablas (projects, beats, jobs)
 │   ├── routes/projects.js   # endpoints /api/projects (crear, listar, ver, editar)
-│   ├── providers/llm.js  # llamada a Claude (Anthropic), movida aquí desde el navegador
-│   └── director/prompt.js  # el prompt que define cómo Claude planea cada guion
+│   ├── providers/llm.js  # llamada a la API gratuita de NVIDIA (NIM), movida aquí desde el navegador
+│   └── director/prompt.js  # el prompt que define cómo la IA planea cada guion
 └── README.md
 ```
 
@@ -79,7 +92,7 @@ Esto **requiere que la app esté servida por HTTP/HTTPS** (no funciona abriendo 
 
 ## Desplegar en producción
 
-Como la app ahora tiene backend (Node/Express + SQLite), **GitHub Pages ya no sirve** para desplegarla completa — solo hostea archivos estáticos y no puede correr `server/`. Necesitas un hosting que ejecute Node.js, por ejemplo Render, Railway, Fly.io o un VPS propio: sube el repo, configura `ANTHROPIC_API_KEY` como variable de entorno del servicio (no como archivo `.env` versionado), y arranca con `npm start` dentro de `server/`. Usa la URL pública que te den como "Authorized JavaScript origin" en el paso anterior de YouTube.
+Como la app ahora tiene backend (Node/Express + SQLite), **GitHub Pages ya no sirve** para desplegarla completa — solo hostea archivos estáticos y no puede correr `server/`. Necesitas un hosting que ejecute Node.js, por ejemplo Render, Railway, Fly.io o un VPS propio: sube el repo, configura `NVIDIA_API_KEY` (y opcionalmente `NVIDIA_MODEL`) como variable de entorno del servicio (no como archivo `.env` versionado), y arranca con `npm start` dentro de `server/`. Usa la URL pública que te den como "Authorized JavaScript origin" en el paso anterior de YouTube.
 
 ## Licencia
 
