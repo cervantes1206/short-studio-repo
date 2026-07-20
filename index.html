@@ -373,8 +373,15 @@
 
         <label>Guion por bloques</label>
         <div id="beatsContainer"></div>
-        <button class="ghost" id="generateImagesBtn" type="button" style="margin-bottom:14px;">🖼️ Generar imágenes relacionadas</button>
+        <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:6px;">
+          <button class="ghost" id="generateImagesBtn" type="button">🖼️ Generar imágenes relacionadas</button>
+          <button class="ghost" id="generateVoiceBtn" type="button">🎙️ Generar narración (voz IA)</button>
+          <button class="ghost" id="generateVideoBtn" type="button">🎬 Armar y ver el short</button>
+        </div>
         <div id="imagesErrorBox"></div>
+        <div id="voiceErrorBox"></div>
+        <div id="videoErrorBox"></div>
+        <video id="shortPreview" controls style="display:none;width:100%;max-width:280px;margin:0 auto 18px;border-radius:10px;background:#000;"></video>
 
         <label>Descripción</label>
         <textarea id="descField" rows="4"></textarea>
@@ -629,6 +636,7 @@ function hydrateFormFromDraft(){
   document.getElementById('audiencia').value = draft.audiencia;
   renderStage2();
   renderPhone();
+  renderVideoPreview();
   document.getElementById('chk1').checked = draft.checklist.chk1;
   document.getElementById('chk2').checked = draft.checklist.chk2;
   document.getElementById('chk3').checked = draft.checklist.chk3;
@@ -718,6 +726,7 @@ document.getElementById('generateBtn').addEventListener('click', async ()=>{
     draft = result;
     renderStage2();
     renderPhone();
+    renderVideoPreview();
     setStage(2);
     renderDraftList();
   }catch(e){
@@ -770,6 +779,71 @@ document.getElementById('generateImagesBtn').addEventListener('click', async ()=
   }
 });
 
+document.getElementById('generateVoiceBtn').addEventListener('click', async ()=>{
+  const errEl = document.getElementById('voiceErrorBox');
+  errEl.innerHTML = '';
+  if(!draft || !draft.id){
+    errEl.innerHTML = '<div class="error-box">Genera el guion primero.</div>';
+    return;
+  }
+  const btn = document.getElementById('generateVoiceBtn');
+  btn.disabled = true;
+  const originalLabel = btn.innerHTML;
+  btn.innerHTML = '<span class="spinner"></span> Generando narración...';
+  try{
+    const response = await fetch('/api/projects/'+draft.id+'/voice', { method: 'POST' });
+    const result = await response.json();
+    if(!response.ok) throw new Error(result.error || 'No se pudo generar la narración.');
+    draft.beats = result.beats || draft.beats;
+    if(result.voiceErrors && result.voiceErrors.length){
+      errEl.innerHTML = '<div class="error-box">Algunos bloques fallaron: '+escapeHtml(result.voiceErrors.join(' | '))+'</div>';
+    }
+  }catch(e){
+    console.error(e);
+    errEl.innerHTML = '<div class="error-box">'+escapeHtml(e.message)+'</div>';
+  }finally{
+    btn.disabled = false;
+    btn.innerHTML = originalLabel;
+  }
+});
+
+function renderVideoPreview(){
+  const video = document.getElementById('shortPreview');
+  if(draft && draft.videoPath){
+    video.src = draft.videoPath + '?t=' + Date.now();
+    video.style.display = 'block';
+  }else{
+    video.removeAttribute('src');
+    video.style.display = 'none';
+  }
+}
+
+document.getElementById('generateVideoBtn').addEventListener('click', async ()=>{
+  const errEl = document.getElementById('videoErrorBox');
+  errEl.innerHTML = '';
+  if(!draft || !draft.id){
+    errEl.innerHTML = '<div class="error-box">Genera el guion primero.</div>';
+    return;
+  }
+  const btn = document.getElementById('generateVideoBtn');
+  btn.disabled = true;
+  const originalLabel = btn.innerHTML;
+  btn.innerHTML = '<span class="spinner"></span> Armando el video... (puede tardar un par de minutos)';
+  try{
+    const response = await fetch('/api/projects/'+draft.id+'/video', { method: 'POST' });
+    const result = await response.json();
+    if(!response.ok) throw new Error(result.error || 'No se pudo armar el video.');
+    draft.videoPath = result.videoPath;
+    renderVideoPreview();
+  }catch(e){
+    console.error(e);
+    errEl.innerHTML = '<div class="error-box">'+escapeHtml(e.message)+'</div>';
+  }finally{
+    btn.disabled = false;
+    btn.innerHTML = originalLabel;
+  }
+});
+
 ['chk1','chk2','chk3','chk4'].forEach(id=>{
   document.getElementById(id).addEventListener('change', (e)=>{
     draft.checklist[id] = e.target.checked;
@@ -806,6 +880,7 @@ document.getElementById('newDraftBtn').addEventListener('click', ()=>{
   document.getElementById('duracion').value = '30 segundos';
   document.getElementById('errorBox').innerHTML = '';
   renderPhone();
+  renderVideoPreview();
   setStage(1);
 });
 

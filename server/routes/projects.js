@@ -2,16 +2,25 @@ const express = require('express');
 const db = require('../db');
 const { callNvidia } = require('../providers/llm');
 const { generateImage } = require('../providers/image');
+const { generateSpeech } = require('../providers/tts');
+const { assembleVideo, probeDuration } = require('../providers/assembly');
 const { buildScriptPrompt } = require('../director/prompt');
-const { saveImage } = require('../storage');
+const { saveImage, saveAudio, absolutePathFromPublic } = require('../storage');
 
 const router = express.Router();
 
 function loadBeats(projectId) {
   return db
-    .prepare('SELECT orden, tiempo, texto, visual, image_path FROM beats WHERE project_id = ? ORDER BY orden ASC')
+    .prepare('SELECT orden, tiempo, texto, visual, image_path, audio_path, audio_duration FROM beats WHERE project_id = ? ORDER BY orden ASC')
     .all(projectId)
-    .map((b) => ({ tiempo: b.tiempo, texto: b.texto, visual: b.visual, imagePath: b.image_path }));
+    .map((b) => ({
+      tiempo: b.tiempo,
+      texto: b.texto,
+      visual: b.visual,
+      imagePath: b.image_path,
+      audioPath: b.audio_path,
+      audioDuration: b.audio_duration
+    }));
 }
 
 function serializeProject(row) {
@@ -31,6 +40,7 @@ function serializeProject(row) {
     miniaturaTexto: row.miniatura_texto,
     checklist: JSON.parse(row.checklist || '{}'),
     iaGenerativa: !!row.ia_generativa,
+    videoPath: row.video_path,
     titleForList: (JSON.parse(row.titulos || '[]'))[row.titulo_seleccionado] || row.tema || 'Short sin título'
   };
 }
@@ -195,6 +205,86 @@ router.post('/:id/images', async (req, res) => {
     return res.status(502).json({ error: errors.join(' | '), ...project });
   }
   res.json({ ...project, imageErrors: errors });
+});
+
+// POST /api/projects/:id/voice — generate AI narration audio per beat, using
+// each beat's "texto" (the narration line) as the TTS input.
+router.post('/:id/voice', async (req, res) => {
+  const row = db.prepare('SELECT * FROM projects WHERE id = ?').get(req.params.id);
+  if (!row) return res.status(404).json({ error: 'Proyecto no encontrado' });
+
+  const beats = db
+    .prepare('SELECT id, orden, texto FROM beats WHERE project_id = ? ORDER BY orden ASC')
+    .all(row.id);
+  if (beats.length === 0) {
+    return res.status(400).json({ error: 'Este proyecto todavía no tiene bloques de guion.' });
+  }
+
+  const updateAudio = db.prepare('UPDATE beats SET audio_path = ?, audio_duration = ? WHERE id = ?');
+  const errors = [];
+
+  for (const beat of beats) {
+    const text = (beat.texto || '').trim();
+    if (!text) continue;
+    try {
+      const buffer = await generateSpeech(text);
+      const publicPath = saveAudio(row.id, beat.orden, buffer);
+      const duration = await probeDuration(absolutePathFromPublic(publicPath));
+      updateAudio.run(publicPath, duration, beat.id);
+    } catch (e) {
+      errors.push(`Bloque ${beat.orden + 1}: ${e.message}`);
+    }
+  }
+
+  db.prepare("UPDATE projects SET updated_at = datetime('now') WHERE id = ?").run(row.id);
+  const updated = db.prepare('SELECT * FROM projects WHERE id = ?').get(row.id);
+  const project = serializeProject(updated);
+
+  if (errors.length === beats.length) {
+    return res.status(502).json({ error: errors.join(' | '), ...project });
+  }
+  res.json({ ...project, voiceErrors: errors });
+});
+
+// POST /api/projects/:id/video — assemble the final short from each beat's
+// image + narration audio, with burned-in captions. Requires every beat to
+// already have both an image and narration audio generated.
+router.post('/:id/video', async (req, res) => {
+  const row = db.prepare('SELECT * FROM projects WHERE id = ?').get(req.params.id);
+  if (!row) return res.status(404).json({ error: 'Proyecto no encontrado' });
+
+  const beats = db
+    .prepare('SELECT orden, texto, image_path, audio_path FROM beats WHERE project_id = ? ORDER BY orden ASC')
+    .all(row.id);
+
+  const missing = beats.filter((b) => !b.image_path || !b.audio_path);
+  if (beats.length === 0 || missing.length > 0) {
+    return res.status(400).json({
+      error: 'Genera primero las imágenes y la narración de todos los bloques antes de armar el video.'
+    });
+  }
+
+  try {
+    const videoPublicPath = await assembleVideo(
+      row.id,
+      beats.map((b) => ({
+        orden: b.orden,
+        texto: b.texto,
+        imageAbsolutePath: absolutePathFromPublic(b.image_path),
+        audioAbsolutePath: absolutePathFromPublic(b.audio_path)
+      }))
+    );
+
+    db.prepare("UPDATE projects SET video_path = ?, updated_at = datetime('now') WHERE id = ?").run(
+      videoPublicPath,
+      row.id
+    );
+    const updated = db.prepare('SELECT * FROM projects WHERE id = ?').get(row.id);
+    res.json(serializeProject(updated));
+  } catch (e) {
+    console.error(e);
+    res.status(502).json({ error: 'No se pudo armar el video: ' + (e.stderr || e.message) });
+  }
 });
 
 module.exports = router;

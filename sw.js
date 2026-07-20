@@ -1,4 +1,4 @@
-const CACHE_NAME = 'shorts-studio-v1';
+const CACHE_NAME = 'shorts-studio-v2';
 const APP_SHELL = [
   './',
   './index.html',
@@ -23,7 +23,10 @@ self.addEventListener('activate', (event) => {
   );
 });
 
-// Same-origin GET requests: stale-while-revalidate.
+// Same-origin GET requests: network-first, falling back to cache only when
+// offline. The app is under active development — always prefer the latest
+// server response over a possibly-stale cached one; cache exists purely for
+// offline support, not as the default source of truth.
 // Cross-origin requests (fonts, Google Identity Services, YouTube API) pass through untouched.
 self.addEventListener('fetch', (event) => {
   const { request } = event;
@@ -31,14 +34,11 @@ self.addEventListener('fetch', (event) => {
   if (new URL(request.url).origin !== location.origin) return;
 
   event.respondWith(
-    caches.match(request).then((cached) => {
-      const network = fetch(request)
-        .then((response) => {
-          caches.open(CACHE_NAME).then((cache) => cache.put(request, response.clone()));
-          return response;
-        })
-        .catch(() => cached);
-      return cached || network;
-    })
+    fetch(request)
+      .then((response) => {
+        caches.open(CACHE_NAME).then((cache) => cache.put(request, response.clone()));
+        return response;
+      })
+      .catch(() => caches.match(request))
   );
 });

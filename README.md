@@ -7,7 +7,7 @@ No es un bot de publicación automática. Cada video pasa por un checklist que m
 ## Qué hace
 
 1. **Generar** — describes el tema, tono, duración y audiencia; el backend le pide a un modelo de IA (vía la API gratuita de NVIDIA) que genere gancho, guion por bloques, opciones de título, descripción, hashtags y texto de miniatura.
-2. **Revisar** — todos los campos quedan editables. El contenido generado es un punto de partida, no una versión final. Desde aquí también puedes generar una imagen relacionada para cada bloque del guion (gratis, vía Pollinations.ai) y verlas en la vista previa tipo teléfono.
+2. **Revisar** — todos los campos quedan editables. El contenido generado es un punto de partida, no una versión final. Desde aquí también puedes generar, para cada bloque del guion: una imagen relacionada (gratis, vía Pollinations.ai), la narración con voz IA (ElevenLabs), y finalmente armar el short completo (imágenes + voz + subtítulos incrustados) con ffmpeg para verlo antes de publicarlo.
 3. **Validar** — un checklist manual (guion revisado, sin derechos de autor, sin clickbait, cumple normas de YouTube) más un interruptor para declarar contenido sintético/alterado por IA.
 4. **Exportar / Publicar** — copia los campos para subirlos tú mismo en YouTube Studio, o conecta tu canal y publica directamente desde la interfaz, con visibilidad privada por defecto y confirmación antes de cada subida.
 
@@ -60,6 +60,26 @@ Cada bloque del guion trae una nota de "qué mostrar en pantalla" — el botón 
 
 > Nota importante ya aprendida en este proyecto: los modelos de imagen que aparecen en el catálogo de build.nvidia.com (FLUX, Stable Diffusion, Qwen-Image) **no tienen versión gratuita alojada** — solo existen como contenedor Docker que corres tú mismo en tu propia GPU. Por eso esta app usa Pollinations para imágenes y NVIDIA solo para texto.
 
+### Narración con voz IA vía ElevenLabs
+
+El botón **"Generar narración (voz IA)"** (paso 02, Revisar) genera un audio por bloque a partir del texto de ese bloque, usando la [API de ElevenLabs](https://elevenlabs.io):
+
+1. Crea una cuenta gratuita en [elevenlabs.io](https://elevenlabs.io) (el plan gratuito incluye un límite mensual de caracteres, suficiente para probar).
+2. Copia tu API key desde el panel de tu cuenta y pégala en `ELEVENLABS_API_KEY` dentro de `.env`.
+3. `ELEVENLABS_VOICE_ID` controla qué voz se usa (por defecto una voz "premade" de la cuenta). Puedes cambiarla por el ID de cualquier otra voz de tu biblioteca de ElevenLabs.
+4. La duración real de cada audio (medida con `ffprobe`) se guarda junto al bloque — esa duración es la que luego define cuánto tiempo se muestra la imagen de ese bloque en el video final.
+
+### Armar el video final vía ffmpeg
+
+El botón **"Armar y ver el short"** (paso 02, Revisar) junta, para cada bloque, su imagen + su audio narrado + su texto como subtítulo incrustado, y concatena todos los bloques en un solo MP4 vertical (720x1280) que se puede previsualizar ahí mismo antes de pasar a Validar/Publicar. Requiere que **todos** los bloques ya tengan imagen y narración generadas.
+
+- Necesitas `ffmpeg`/`ffprobe` con soporte para el filtro `drawtext` (subtítulos incrustados). El `ffmpeg` normal de Homebrew (`brew install ffmpeg`) **no trae ese soporte** — instala la variante completa:
+  ```bash
+  brew install ffmpeg-full
+  ```
+- `FFMPEG_PATH` y `FFPROBE_PATH` en `.env` deben apuntar a los binarios de `ffmpeg-full` (por ejemplo `/opt/homebrew/opt/ffmpeg-full/bin/ffmpeg` y `.../ffprobe` en macOS con Homebrew Apple Silicon), porque `ffmpeg-full` es "keg-only" y no se agrega solo al PATH.
+- El video final se guarda en `server/storage/<id-del-proyecto>/short.mp4` (tampoco se sube al repo).
+
 ## Conectar tu canal de YouTube (opcional)
 
 La publicación directa usa OAuth de Google desde el navegador — tus credenciales nunca pasan por ningún servidor intermedio. Necesitas tu propio proyecto de Google Cloud:
@@ -83,14 +103,16 @@ shorts-studio/
 ├── manifest.json       # metadata de la PWA (nombre, iconos, colores)
 ├── sw.js               # service worker: cachea el shell de la app para uso offline
 ├── icons/               # iconos de la app (192, 512, 180 apple-touch, 32 favicon)
-├── .env.example         # plantilla de variables de entorno (NVIDIA_API_KEY, NVIDIA_MODEL, PORT)
+├── .env.example         # plantilla de variables de entorno (NVIDIA_API_KEY, ELEVENLABS_API_KEY, FFMPEG_PATH, PORT...)
 ├── server/
 │   ├── index.js         # servidor Express: sirve la API, el frontend y /storage
 │   ├── db.js             # conexión SQLite + creación de tablas (projects, beats, jobs)
-│   ├── storage.js        # guarda las imágenes generadas en server/storage/<id>/
-│   ├── routes/projects.js   # endpoints /api/projects (crear, listar, ver, editar, generar imágenes)
+│   ├── storage.js        # guarda imágenes, audios y el video final en server/storage/<id>/
+│   ├── routes/projects.js   # endpoints /api/projects (crear, listar, ver, editar, imágenes, voz, video)
 │   ├── providers/llm.js  # llamada a la API gratuita de NVIDIA (NIM) para el guion
 │   ├── providers/image.js  # llamada a Pollinations.ai para las imágenes por bloque
+│   ├── providers/tts.js   # llamada a ElevenLabs para la narración con voz IA por bloque
+│   ├── providers/assembly.js  # ensamblado ffmpeg: imagen + audio + subtítulo incrustado por bloque → MP4 final
 │   └── director/prompt.js  # el prompt que define cómo la IA planea cada guion
 └── README.md
 ```

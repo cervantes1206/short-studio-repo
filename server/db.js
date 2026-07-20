@@ -20,6 +20,7 @@ db.exec(`
     miniatura_texto TEXT NOT NULL DEFAULT '',
     checklist TEXT NOT NULL DEFAULT '{}',
     ia_generativa INTEGER NOT NULL DEFAULT 0,
+    video_path TEXT,
     created_at TEXT NOT NULL DEFAULT (datetime('now')),
     updated_at TEXT NOT NULL DEFAULT (datetime('now'))
   );
@@ -32,7 +33,8 @@ db.exec(`
     texto TEXT NOT NULL DEFAULT '',
     visual TEXT NOT NULL DEFAULT '',
     image_path TEXT,
-    audio_path TEXT
+    audio_path TEXT,
+    audio_duration REAL
   );
 
   CREATE TABLE IF NOT EXISTS jobs (
@@ -45,5 +47,18 @@ db.exec(`
     updated_at TEXT NOT NULL DEFAULT (datetime('now'))
   );
 `);
+
+// CREATE TABLE IF NOT EXISTS only creates missing tables — it doesn't add new
+// columns to a table that already exists from an earlier version of this file.
+// Migrate existing databases forward, ignoring "duplicate column" errors.
+function addColumnIfMissing(table, columnDef) {
+  try {
+    db.exec(`ALTER TABLE ${table} ADD COLUMN ${columnDef}`);
+  } catch (e) {
+    if (!/duplicate column/i.test(e.message)) throw e;
+  }
+}
+addColumnIfMissing('projects', 'video_path TEXT');
+addColumnIfMissing('beats', 'audio_duration REAL');
 
 module.exports = db;
